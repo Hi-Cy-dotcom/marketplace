@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { AlertTriangle, Clock, Mail, MapPin, PackageX, RotateCw, Tag } from "lucide-react";
+import { AlertTriangle, Clock, Lock, Loader2, Mail, MapPin, PackageX, RotateCw, Tag } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,14 @@ type LoadState =
   | { status: "error"; key: number; error: string }
   | { status: "success"; key: number; listing: Listing };
 
+type CanBuyState =
+  | { status: "loading" }
+  | { status: "unknown" }
+  | { status: "can_buy" }
+  | { status: "sold" }
+  | { status: "price_too_low" }
+  | { status: "seller_not_onboarded" };
+
 function initials(email: string) {
   const name = email.split("@")[0] ?? "";
   const parts = name.split(/[._-]+/).filter(Boolean);
@@ -31,6 +39,8 @@ function initials(email: string) {
 export function ItemDetail({ id }: { id: string }) {
   const [reloadKey, setReloadKey] = useState(0);
   const [result, setResult] = useState<LoadState>({ status: "loading" });
+  const [canBuyState, setCanBuyState] = useState<CanBuyState>({ status: "loading" });
+  const [isCheckingOut, setIsCheckingOut] = useState(false);
   const state: LoadState =
     result.status !== "loading" && result.key === reloadKey ? result : { status: "loading" };
 
@@ -57,7 +67,57 @@ export function ItemDetail({ id }: { id: string }) {
     };
   }, [id, reloadKey]);
 
+  useEffect(() => {
+    if (state.status !== "success") return;
+
+    const checkCanBuy = async () => {
+      try {
+        const response = await fetch(`/api/listings/${id}/can-buy`);
+        if (response.ok) {
+          const data = await response.json();
+          // API returns { data: { canBuy, reason } }
+          const canBuy = data.data?.canBuy;
+          const reason = data.data?.reason;
+          setCanBuyState({ status: canBuy ? "can_buy" : reason });
+        } else {
+          setCanBuyState({ status: "unknown" });
+        }
+      } catch (err) {
+        setCanBuyState({ status: "unknown" });
+      }
+    };
+
+    checkCanBuy();
+  }, [id, state.status]);
+
   const retry = useCallback(() => setReloadKey((k) => k + 1), []);
+
+  const handleBuyNow = async () => {
+    if (isCheckingOut) return;
+    setIsCheckingOut(true);
+
+    try {
+      const response = await fetch("/api/stripe/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ listingId: id }),
+      });
+
+      const data = await response.json();
+
+      // API returns { data: { url } }
+      const url = data.data?.url;
+      if (response.ok && url) {
+        window.location.href = url;
+      } else {
+        alert(data.error || "Failed to start checkout");
+      }
+    } catch (err) {
+      alert("Something went wrong");
+    } finally {
+      setIsCheckingOut(false);
+    }
+  };
 
   if (state.status === "loading") return <ItemDetailSkeleton />;
 
@@ -96,6 +156,9 @@ export function ItemDetail({ id }: { id: string }) {
 
   const { listing } = state;
 
+  const isSold = listing.status === "sold";
+  const canBuy = canBuyState.status === "can_buy";
+
   return (
     <div className="lg:grid lg:h-[calc(100vh-3.5rem)] lg:grid-cols-[minmax(0,1fr)_380px] xl:grid-cols-[minmax(0,1fr)_420px]">
       <div className="relative aspect-square bg-neutral-900 sm:aspect-[4/3] lg:aspect-auto lg:h-full">
@@ -106,6 +169,11 @@ export function ItemDetail({ id }: { id: string }) {
           sizes="(min-width: 1024px) 70vw, 100vw"
           className="object-contain"
         />
+        {isSold && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/60">
+            <Badge className="text-lg px-6 py-2">Sold</Badge>
+          </div>
+        )}
         <BackButton className="absolute left-4 top-4 bg-card/90 shadow hover:bg-card" />
       </div>
 
@@ -166,11 +234,59 @@ export function ItemDetail({ id }: { id: string }) {
 
           <Separator />
 
+          {!isSold && (
+            <section>
+              {canBuy ? (
+                <Button
+                  onClick={handleBuyNow}
+                  disabled={isCheckingOut}
+                  className="w-full"
+                  size="lg"
+                >
+                  {isCheckingOut ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Starting checkout...
+                    </>
+                  ) : (
+                    <>
+                      <Lock className="mr-2 h-4 w-4" />
+                      Buy Now
+                    </>
+                  )}
+                </Button>
+              ) : canBuyState.status === "seller_not_onboarded" ? (
+                <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-4">
+                  <p className="text-sm text-yellow-900">
+                    Seller hasn't enabled payments yet.{" "}
+                    <Link href="/sell/connect" className="font-semibold underline">
+                      Are you the seller?
+                    </Link>
+                  </p>
+                </div>
+              ) : canBuyState.status === "price_too_low" ? (
+                <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-4">
+                  <p className="text-sm text-yellow-900">
+                    This item's price is too low for Stripe processing.
+                  </p>
+                </div>
+              ) : null}
+            </section>
+          )}
+
+          <Separator />
+
           <section aria-labelledby="message-seller-heading">
             <h2 id="message-seller-heading" className="mb-3 text-lg font-semibold">
-              Send seller a message
+              {isSold ? "This item has been sold" : "Send seller a message"}
             </h2>
-            <MessageSellerForm listingId={listing.id} listingTitle={listing.title} />
+            {isSold ? (
+              <div className="rounded-lg border border-muted bg-muted/50 p-4 text-center text-sm text-muted-foreground">
+                This item is no longer available.
+              </div>
+            ) : (
+              <MessageSellerForm listingId={listing.id} listingTitle={listing.title} />
+            )}
           </section>
         </div>
       </aside>

@@ -206,3 +206,59 @@ create policy "Anyone can upload listing images"
   for insert
   to anon, authenticated
   with check (bucket_id = 'listing-images');
+
+-- -----------------------------------------------------------------------------
+-- sellers (Stripe Connect)
+-- -----------------------------------------------------------------------------
+create table if not exists public.sellers (
+  email                text primary key check (
+    char_length(email) <= 254
+    and email ~* '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]{2,}$'
+  ),
+  stripe_account_id    text not null,
+  charges_enabled      boolean not null default false,
+  details_submitted   boolean not null default false,
+  created_at           timestamptz not null default now()
+);
+
+-- No public access to sellers table - only server code (service role) touches it
+alter table public.sellers enable row level security;
+
+-- -----------------------------------------------------------------------------
+-- orders (Stripe payments)
+-- -----------------------------------------------------------------------------
+create table if not exists public.orders (
+  id                       uuid primary key default gen_random_uuid(),
+  listing_id               uuid not null references public.listings (id) on delete cascade,
+  stripe_account_id        text not null,
+  stripe_session_id        text not null unique,
+  stripe_payment_intent_id text,
+  amount_total             integer not null, -- smallest currency unit
+  application_fee_amount   integer not null,
+  currency                 text not null,
+  buyer_email              text check (
+    buyer_email is null or (
+      char_length(buyer_email) <= 254
+      and buyer_email ~* '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]{2,}$'
+    )
+  ),
+  status                   text not null default 'pending' check (status in ('pending', 'paid', 'needs_review')),
+  created_at               timestamptz not null default now(),
+  paid_at                  timestamptz
+);
+
+create index if not exists orders_listing_id_idx on public.orders (listing_id);
+create index if not exists orders_stripe_session_id_idx on public.orders (stripe_session_id);
+
+-- No public access to orders table - only server code (service role) touches it
+alter table public.orders enable row level security;
+
+-- -----------------------------------------------------------------------------
+-- Update listings table with status and sold_at
+-- -----------------------------------------------------------------------------
+alter table public.listings
+  add column if not exists status text not null default 'available' check (status in ('available', 'sold')),
+  add column if not exists sold_at timestamptz;
+
+-- Update existing rows to have 'available' status
+update public.listings set status = 'available' where status is null;

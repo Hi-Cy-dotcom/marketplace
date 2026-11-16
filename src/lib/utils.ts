@@ -5,24 +5,17 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-const wholePriceFormatter = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-  maximumFractionDigits: 0,
-});
-
-const centsPriceFormatter = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-});
-
-export function formatPrice(price: number): string {
+export function formatPrice(price: number, currency: string = "USD"): string {
   if (!Number.isFinite(price) || price <= 0) return "Free";
-  return Number.isInteger(price)
-    ? wholePriceFormatter.format(price)
-    : centsPriceFormatter.format(price);
+  
+  const formatter = new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: currency.toUpperCase(),
+    minimumFractionDigits: Number.isInteger(price) ? 0 : 2,
+    maximumFractionDigits: 2,
+  });
+  
+  return formatter.format(price);
 }
 
 /** Keeps digits and a single decimal point (max 2 decimals) and adds thousands separators. */
