@@ -2,10 +2,10 @@
 
 import { useEffect, useState, use } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { CheckCircle2, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { ListingImage } from "@/components/marketplace/listing-image";
 import { formatPrice } from "@/lib/utils";
 
 interface OrderStatus {
@@ -196,12 +196,12 @@ export default function CheckoutSuccessPage({
         </CardHeader>
         <CardContent className="space-y-4">
           {orderStatus.listingImage && (
-            <div className="aspect-square w-full overflow-hidden rounded-lg bg-neutral-100">
-              <ListingImage
+            <div className="flex justify-center">
+              <img
                 src={orderStatus.listingImage}
                 alt={orderStatus.listingTitle}
-                sizes="400px"
-                className="h-full w-full object-contain"
+                loading="eager"
+                style={{ width: '150px', height: '150px', objectFit: 'contain', borderRadius: '8px' }}
               />
             </div>
           )}

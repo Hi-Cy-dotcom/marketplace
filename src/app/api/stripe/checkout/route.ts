@@ -95,7 +95,6 @@ export async function POST(request: Request) {
               product_data: {
                 name: listing.title,
                 description: listing.description.substring(0, 500),
-                images: listing.image_url ? [listing.image_url] : undefined,
               },
               unit_amount: amount,
             },
