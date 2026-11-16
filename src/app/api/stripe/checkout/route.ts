@@ -4,14 +4,13 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { stripe } from "@/lib/stripe";
 import type { Listing, Seller } from "@/lib/types";
 
-if (!process.env.NEXT_PUBLIC_SITE_URL) {
-  throw new Error("NEXT_PUBLIC_SITE_URL is not set");
-}
-
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL;
-
 // POST /api/stripe/checkout { listingId }
 export async function POST(request: Request) {
+  const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL;
+  if (!SITE_URL) {
+    return fail("NEXT_PUBLIC_SITE_URL is not set", 500);
+  }
+
   try {
     const body = await readJson(request);
     if (body === undefined || typeof body !== "object" || body === null) {

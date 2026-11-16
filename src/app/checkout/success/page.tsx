@@ -25,6 +25,7 @@ export default function CheckoutSuccessPage({
   const [orderStatus, setOrderStatus] = useState<OrderStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [polling, setPolling] = useState(false);
+  const [timedOut, setTimedOut] = useState(false);
 
   useEffect(() => {
     if (!sessionId) {
@@ -73,9 +74,10 @@ export default function CheckoutSuccessPage({
       }
     }, 2000);
 
-    // Stop polling after 30 seconds
+    // Stop polling after 30 seconds and show timeout message
     const timeout = setTimeout(() => {
       clearInterval(pollInterval);
+      setTimedOut(true);
     }, 30000);
 
     return () => {
@@ -116,6 +118,28 @@ export default function CheckoutSuccessPage({
   }
 
   if (orderStatus.status === "pending") {
+    if (timedOut) {
+      return (
+        <div className="flex min-h-screen items-center justify-center p-4">
+          <Card className="w-full max-w-md">
+            <CardHeader>
+              <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-blue-100">
+                <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+              </div>
+              <CardTitle className="text-center">Still confirming your payment...</CardTitle>
+              <CardDescription className="text-center">
+                Your payment is being processed. Check back shortly or contact support if this persists.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button asChild className="w-full">
+                <Link href="/">Back to Marketplace</Link>
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      );
+    }
     return (
       <div className="flex min-h-screen items-center justify-center p-4">
         <Card className="w-full max-w-md">

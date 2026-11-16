@@ -1,6 +1,7 @@
 import { headers } from "next/headers";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { stripe } from "@/lib/stripe";
+import { markOrderPaidFromSession } from "@/lib/stripe-order";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,14 +15,15 @@ export async function POST(request: Request) {
     return new Response("No signature", { status: 400 });
   }
 
-  if (!process.env.STRIPE_WEBHOOK_SECRET) {
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+  if (!webhookSecret) {
     console.error("STRIPE_WEBHOOK_SECRET is not set");
     return new Response("Webhook secret not configured", { status: 500 });
   }
 
   let event;
   try {
-    event = stripe.webhooks.constructEvent(body, signature, process.env.STRIPE_WEBHOOK_SECRET);
+    event = stripe.webhooks.constructEvent(body, signature, webhookSecret);
   } catch (err) {
     console.error("Webhook signature verification failed:", err);
     return new Response("Invalid signature", { status: 400 });
@@ -32,15 +34,12 @@ export async function POST(request: Request) {
     const session = event.data.object as {
       id: string;
       payment_status: string;
-      payment_intent: string | null;
-      metadata?: {
-        order_id?: string;
-        listing_id?: string;
-      };
+      payment_intent: string | { id: string } | null;
+      metadata: Record<string, string> | null;
       account?: string;
-      customer_details?: {
-        email?: string;
-      };
+      customer_details: {
+        email: string | null;
+      } | null;
     };
 
     // Only process paid sessions
@@ -72,57 +71,8 @@ export async function POST(request: Request) {
       return new Response("OK", { status: 200 });
     }
 
-    // Idempotent: only update if still pending
-    if (order.status !== "pending") {
-      return new Response("OK", { status: 200 });
-    }
-
-    // Mark order as paid
-    const { error: orderError } = await supabaseAdmin
-      .from("orders")
-      .update({
-        status: "paid",
-        stripe_payment_intent_id: session.payment_intent,
-        buyer_email: session.customer_details?.email || "",
-        paid_at: new Date().toISOString(),
-      })
-      .eq("id", orderId);
-
-    if (orderError) {
-      console.error("Failed to update order:", orderError);
-      return new Response("OK", { status: 200 });
-    }
-
-    // Mark listing as sold (only if still available)
-    const { data: listing } = await supabaseAdmin
-      .from("listings")
-      .select("*")
-      .eq("id", order.listing_id)
-      .maybeSingle();
-
-    if (listing && listing.status === "available") {
-      const { error: listingError } = await supabaseAdmin
-        .from("listings")
-        .update({ status: "sold", sold_at: new Date().toISOString() })
-        .eq("id", order.listing_id)
-        .eq("status", "available");
-
-      if (listingError) {
-        console.error("Failed to mark listing as sold:", listingError);
-        // If listing was already sold by another order, mark this order for review
-        await supabaseAdmin
-          .from("orders")
-          .update({ status: "needs_review" })
-          .eq("id", orderId);
-      }
-    } else if (listing && listing.status === "sold") {
-      // Listing was already sold by another order
-      console.error("Listing already sold, marking order for review:", orderId);
-      await supabaseAdmin
-        .from("orders")
-        .update({ status: "needs_review" })
-        .eq("id", orderId);
-    }
+    // Use shared function to mark order as paid
+    await markOrderPaidFromSession(session, order.stripe_account_id);
   }
 
   // Handle account.updated
